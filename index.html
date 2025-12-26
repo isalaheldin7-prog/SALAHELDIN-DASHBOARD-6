@@ -31,7 +31,7 @@ th,td{padding:8px;border-bottom:1px solid var(--border)}
 <!-- رأس المال -->
 <div class="card">
 <b>💰 رأس المال</b>
-<input id="capital" type="number" placeholder="Account Size ($)">
+<input id="capitalInput" type="number" placeholder="Account Size ($)">
 <button onclick="saveCapital()">حفظ</button>
 </div>
 
@@ -47,14 +47,16 @@ th,td{padding:8px;border-bottom:1px solid var(--border)}
 
 <!-- إحصائيات -->
 <div class="card grid">
-<div>Net P&L<br><b id="net"></b></div>
-<div>Return %<br><b id="return"></b></div>
-<div>Drawdown %<br><b id="dd"></b></div>
-<div>Trades<br><b id="count"></b></div>
+<div>Net P&L<br><b id="net">0</b></div>
+<div>Return %<br><b id="ret">-</b></div>
+<div>Drawdown %<br><b id="dd">-</b></div>
+<div>Trades<br><b id="count">0</b></div>
 </div>
 
 <!-- شارت -->
-<div class="card"><canvas id="chart"></canvas></div>
+<div class="card">
+<canvas id="chartCanvas"></canvas>
+</div>
 
 <!-- إضافة / تعديل -->
 <div class="card">
@@ -68,7 +70,7 @@ th,td{padding:8px;border-bottom:1px solid var(--border)}
 <option>Revenge</option>
 <option>No Plan</option>
 </select>
-<button onclick="saveTrade()">Save</button>
+<button onclick="saveTrade()">Save Trade</button>
 </div>
 
 <!-- جدول -->
@@ -83,105 +85,81 @@ th,td{padding:8px;border-bottom:1px solid var(--border)}
 </div>
 
 <script>
-let trades=JSON.parse(localStorage.getItem('trades'))||[];
-let capital=+localStorage.getItem('capital')||0;
-let editIndex=null;
-let chart;
+let trades = JSON.parse(localStorage.getItem('trades')) || [];
+let capital = +localStorage.getItem('capital') || 0;
+let editIndex = null;
+let chart = null;
 
-capitalInput.value=capital||'';
+capitalInput.value = capital || '';
 
 function saveCapital(){
-capital=+capitalInput.value;
-localStorage.setItem('capital',capital);
+capital = +capitalInput.value;
+localStorage.setItem('capital', capital);
 render();
 }
 
 function saveTrade(){
-const t={
-symbol:symbol.value,
-side:side.value,
-pnl:+pnl.value,
-mistake:mistake.value,
-date:new Date().toISOString()
+if(!symbol.value || pnl.value===''){
+alert('أدخل الرمز و P&L');
+return;
+}
+
+const trade = {
+id: Date.now(),
+symbol: symbol.value,
+side: side.value,
+pnl: +pnl.value,
+mistake: mistake.value,
+date: new Date().toISOString()
 };
-if(editIndex!==null){trades[editIndex]=t;editIndex=null;}
-else trades.push(t);
-localStorage.setItem('trades',JSON.stringify(trades));
-symbol.value=pnl.value='';
+
+if(editIndex !== null){
+trades[editIndex] = trade;
+editIndex = null;
+}else{
+trades.push(trade);
+}
+
+localStorage.setItem('trades', JSON.stringify(trades));
+symbol.value = pnl.value = '';
+side.value = 'Long';
+mistake.value = '';
 render();
 }
 
 function filterTrades(){
-const f=filter.value;
-const now=new Date();
+const f = filter.value;
+const now = new Date();
 return trades.filter(t=>{
-const d=new Date(t.date);
-if(f==='day') return d.toDateString()===now.toDateString();
-if(f==='week') return (now-d)/(1000*60*60*24)<=7;
-if(f==='month') return d.getMonth()===now.getMonth();
+const d = new Date(t.date);
+if(f==='day') return d.toDateString() === now.toDateString();
+if(f==='week') return (now - d)/(1000*60*60*24) <= 7;
+if(f==='month') return d.getMonth() === now.getMonth();
 return true;
 });
 }
 
 function render(){
-const list=filterTrades();
-rows.innerHTML='';
-let sum=0,eq=[0],dd=0,peak=0;
+const list = filterTrades();
+rows.innerHTML = '';
 
-list.forEach((t,i)=>{
-sum+=t.pnl; eq.push(sum);
-peak=Math.max(peak,sum);
-dd=Math.min(dd,sum-peak);
-rows.innerHTML+=`
+let sum = 0, equity = [0], peak = 0, ddVal = 0;
+
+list.forEach((t)=>{
+sum += t.pnl;
+equity.push(sum);
+peak = Math.max(peak, sum);
+ddVal = Math.min(ddVal, sum - peak);
+
+rows.innerHTML += `
 <tr>
 <td>${t.symbol}</td>
 <td class="${t.pnl>=0?'win':'loss'}">${t.pnl}</td>
-<td onclick="edit(${i})">✏️</td>
-<td onclick="del(${i})">🗑</td>
+<td onclick="editTrade(${t.id})">✏️</td>
+<td onclick="delTrade(${t.id})">🗑</td>
 </tr>`;
 });
 
-net.innerText=sum;
-count.innerText=list.length;
-return.innerText=capital?((sum/capital)*100).toFixed(2)+'%':'-';
-dd.innerText=capital?((dd/capital)*100).toFixed(2)+'%':'-';
-draw(eq);
-}
-
-function draw(d){
-if(chart)chart.destroy();
-chart=new Chart(chartCanvas,{
-type:'line',
-data:{labels:d.map((_,i)=>i),datasets:[{data:d,borderColor:'#8b5cf6',fill:true}]},
-options:{plugins:{legend:{display:false}}}
-});
-}
-
-function edit(i){
-const t=trades[i];
-symbol.value=t.symbol;
-side.value=t.side;
-pnl.value=t.pnl;
-mistake.value=t.mistake;
-editIndex=i;
-}
-
-function del(i){
-trades.splice(i,1);
-localStorage.setItem('trades',JSON.stringify(trades));
-render();
-}
-
-function exportCSV(){
-let csv="Symbol,Side,PnL,Mistake,Date\n";
-trades.forEach(t=>csv+=`${t.symbol},${t.side},${t.pnl},${t.mistake},${t.date}\n`);
-let a=document.createElement('a');
-a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-a.download='trades.csv';
-a.click();
-}
-
-render();
-</script>
-</body>
-</html>
+net.innerText = sum;
+count.innerText = list.length;
+ret.inner
